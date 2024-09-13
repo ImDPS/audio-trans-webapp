@@ -29,25 +29,31 @@ async function ensureTempDirExists() {
   }
 }
 
+/**
+ * Handles the POST request to convert an uploaded file to a specified format.
+ *
+ * @param {NextRequest} request - The incoming HTTP request object containing the file and format.
+ * @returns {Promise<NextResponse>} - A promise that resolves to a NextResponse object containing
+ * the converted file or an error message.
+ */
 export async function POST(request: NextRequest) {
   try {
     await ensureTempDirExists();
 
     const formData = await request.formData();
     const file = formData.get("file") as File;
+    const format = formData.get("format") as string;
 
     if (!file) {
       return new NextResponse("No file provided", { status: 400 });
     }
 
+    if (!format) {
+      return new NextResponse("No output format provided", { status: 400 });
+    }
+
     // Save the file to a temporary location
     const tempInputPath = path.join(tempDir, file.name);
-    const tempOutputPath = path.join(
-      tempDir,
-      file.name.replace(".aac", ".wav")
-    );
-
-    console.log(tempInputPath, tempOutputPath);
 
     const buffer = Buffer.from(await file.arrayBuffer());
     await new Promise((resolve, reject) => {
@@ -57,15 +63,27 @@ export async function POST(request: NextRequest) {
       writeStream.end(buffer);
     });
 
+    // Set the output path
+    const tempOutputPath = path.join(
+      tempDir,
+      `${path.parse(file.name).name}.${format}`
+    );
+
+    console.log(tempInputPath, tempOutputPath);
+
     // Convert the file using ffmpeg
     await new Promise((resolve, reject) => {
       ffmpeg(tempInputPath)
-        .toFormat("wav")
+        .toFormat(format)
         .on("end", resolve)
         .on("error", reject)
         .save(tempOutputPath);
     });
 
+    console.log(
+      "File converted: ",
+      `${file.name.replace(path.extname(file.name), `.${format}`)}`
+    );
     // Read the converted file and send it in response
     const convertedStream = createReadStream(tempOutputPath);
 
@@ -77,10 +95,10 @@ export async function POST(request: NextRequest) {
         resolve(
           new NextResponse(convertedBuffer, {
             headers: {
-              "Content-Type": "audio/wav",
+              "Content-Type": `audio/${format}`,
               "Content-Disposition": `attachment; filename=${file.name.replace(
-                ".aac",
-                ".wav"
+                path.extname(file.name),
+                `.${format}`
               )}`,
             },
           })
